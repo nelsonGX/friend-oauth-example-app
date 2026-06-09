@@ -28,8 +28,11 @@ export async function GET() {
       description: PRODUCT.description,
     });
     url = intent.url;
-  } catch {
-    redirect("/?pay=error");
+  } catch (e) {
+    // Common cause: FGC_PAY_REDIRECT_URI is not a registered redirect URI.
+    console.error("[buy] create intent failed:", e);
+    const msg = e instanceof Error ? e.message : "pay_error";
+    redirect(`/?pay=error&reason=${encodeURIComponent(msg.slice(0, 200))}`);
   }
 
   // Hand the user off to the pay server's hosted confirmation page.

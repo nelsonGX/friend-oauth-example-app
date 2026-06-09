@@ -49,7 +49,10 @@ function resolveFlash(sp: SearchParams): Flash | null {
       case "access_denied":
         return { tone: "bad", text: "Payment denied." };
       case "error":
-        return { tone: "bad", text: "Could not start or verify the payment." };
+        return {
+          tone: "bad",
+          text: `Could not start or verify the payment${reason ? `: ${reason}` : "."}`,
+        };
     }
   }
 

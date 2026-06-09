@@ -42,7 +42,11 @@ export async function GET(request: NextRequest) {
       target = `/?pay=${encodeURIComponent(result.status)}`;
     }
   } catch (e) {
-    if (!(e instanceof Done)) target = "/?pay=error";
+    if (!(e instanceof Done)) {
+      console.error("[pay/callback] verify failed:", e);
+      const msg = e instanceof Error ? e.message : "pay_error";
+      target = `/?pay=error&reason=${encodeURIComponent(msg.slice(0, 200))}`;
+    }
   }
 
   redirect(target);
