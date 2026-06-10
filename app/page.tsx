@@ -25,6 +25,10 @@ export default async function Home({
   const pay = one(sp.pay);
   const payAmount = one(sp.pay_amount);
   const payDetail = one(sp.pay_detail);
+  const reward = one(sp.reward);
+  const rewardAmount = one(sp.reward_amount);
+  const rewardBalance = one(sp.reward_balance);
+  const rewardDetail = one(sp.reward_detail);
 
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-12">
@@ -36,7 +40,8 @@ export default async function Home({
         <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
           A live tour of what the provider exposes: Discord-gated login, PKCE,
           identity &amp; role claims, token rotation, and the credits/payment
-          extension.
+          extension — charges (user pays the app) and payouts (app rewards the
+          user).
         </p>
       </header>
 
@@ -61,6 +66,31 @@ export default async function Home({
       {pay && pay !== "paid" && (
         <Banner tone="warn" title={`Payment: ${pay}`}>
           {payDetail ?? "Payment was not completed; nothing was granted."}
+        </Banner>
+      )}
+      {reward === "paid" && (
+        <Banner tone="ok" title="Reward sent">
+          Paid {rewardAmount} credits to your account from the app&apos;s balance
+          via <code>/api/pay/reverse</code> (<code>paid === true</code>). App
+          balance now {rewardBalance} credits.
+        </Banner>
+      )}
+      {reward === "duplicate" && (
+        <Banner tone="ok" title="Reward already sent">
+          That reward <code>ref</code> was already paid — the provider de-duped
+          it (<code>duplicate === true</code>), so you were not paid twice. Log
+          out and back in for a fresh reward.
+        </Banner>
+      )}
+      {reward === "insufficient_funds" && (
+        <Banner tone="warn" title="App balance too low">
+          The app has no funds to pay out. Top up under{" "}
+          <strong>Manage → Funding</strong> in the dashboard, then try again.
+        </Banner>
+      )}
+      {reward === "error" && (
+        <Banner tone="error" title="Reward failed">
+          {rewardDetail ?? "Could not send the reward."}
         </Banner>
       )}
 
@@ -258,6 +288,28 @@ function Dashboard({
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500"
             >
               💳 Charge credits
+            </button>
+          </form>
+        )}
+
+        {hasCredits && (
+          <form
+            action="/api/pay/reward"
+            method="post"
+            className="flex items-center gap-2"
+          >
+            <input
+              type="number"
+              name="amount"
+              defaultValue={5}
+              min={1}
+              className="w-20 rounded-lg border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+            />
+            <button
+              type="submit"
+              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500"
+            >
+              🎁 Reward credits
             </button>
           </form>
         )}

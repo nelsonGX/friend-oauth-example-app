@@ -245,3 +245,53 @@ export async function verifyPayIntent(intentId: string): Promise<PayVerify> {
   }
   return (await res.json()) as PayVerify;
 }
+
+// ---------------------------------------------------------------------------
+// Reverse pay — pay/reward a user FROM the app's own balance.
+//
+// Unlike intent/verify this is NOT advertised in the discovery document, so the
+// path is derived from the base URL (per the provider's reference). The app's
+// balance must be funded (dashboard → Manage → Funding) or the provider returns
+// 402 insufficient_funds. Reverse-paid credits are spendable user credits, not
+// withdrawable developer income.
+// ---------------------------------------------------------------------------
+
+export type PayReverse = {
+  payout_id: string;
+  status: string;
+  amount: number;
+  user_id: string;
+  ref: string;
+  /** true when this ref was already paid — the call was de-duped, not re-paid. */
+  duplicate: boolean;
+  /** the app's remaining balance after the payout */
+  app_balance: number;
+  paid: boolean;
+};
+
+export async function reversePay(opts: {
+  userId: string;
+  amount: number;
+  ref: string;
+  description?: string;
+}): Promise<PayReverse> {
+  const body = new URLSearchParams({
+    ...clientAuthBody(),
+    user_id: opts.userId,
+    amount: String(opts.amount),
+    ref: opts.ref,
+  });
+  if (opts.description) body.set("description", opts.description);
+  const res = await fetch(`${AUTH_BASE_URL}/api/pay/reverse`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    // Surface the provider's machine-readable error code (e.g.
+    // `insufficient_funds`) so callers can branch on it.
+    throw new Error(`pay reverse ${res.status}: ${await res.text()}`);
+  }
+  return (await res.json()) as PayReverse;
+}

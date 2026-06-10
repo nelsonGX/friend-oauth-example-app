@@ -15,6 +15,11 @@ it to auto-configure.
 | Create pay intent  | `POST http://localhost:3000/api/pay/intent`         |
 | User confirms pay  | `GET  http://localhost:3000/pay?intent=…`           |
 | Verify pay         | `POST http://localhost:3000/api/pay/verify`         |
+| Reverse pay        | `POST http://localhost:3000/api/pay/reverse`        |
+| Data get           | `POST http://localhost:3000/api/data/get`           |
+| Data set           | `POST http://localhost:3000/api/data/set`           |
+| Data delete        | `POST http://localhost:3000/api/data/delete`        |
+| Data list          | `POST http://localhost:3000/api/data/list`          |
 
 ## Hard rules
 - PKCE (S256) is **required** on the authorization request.
@@ -29,7 +34,7 @@ it to auto-configure.
 
 ## Scopes (request only what you need, space-separated)
 - `identify` : `username`, `global_name`, `avatar`, `discord_id`
-- `roles`    : `roles[]`, `allowed`, `in_guild`
+- `roles`    : `allowed`, `in_guild` (access status only — role IDs are never exposed)
 - `credits`  : `credits` (integer balance)
 
 Requesting a scope the app isn't allowed is rejected with `invalid_scope` (no
@@ -63,7 +68,7 @@ silent down-scoping). The granted `scope` is echoed in the token response.
    GET http://localhost:3000/api/oauth/userinfo
    Authorization: Bearer {access_token}
    ```
-   → `{ sub, id, username, global_name, avatar, discord_id, roles, allowed, in_guild, credits }`
+   → `{ sub, id, username, global_name, avatar, discord_id, allowed, in_guild, credits }`
    Require `allowed === true`.
 
 ### Tokens & refresh
@@ -78,6 +83,10 @@ grant_type=refresh_token&refresh_token={rt}&client_id={CLIENT_ID}&client_secret=
 Revoke: `POST http://localhost:3000/api/oauth/revoke` with `token={t}` + client auth.
 
 ## Pay — charge a user credits (only if the app needs it)
+Credit value is FIXED across every app on this server: **1 credit = 1 TWD**. Set
+`amount` (integer credits) equal to the price in TWD — never apply your own
+conversion, markup, or rounding, so an item costs the same on every platform.
+
 1. **Create an intent (server-side):**
    ```
    POST http://localhost:3000/api/pay/intent
@@ -97,6 +106,19 @@ Revoke: `POST http://localhost:3000/api/oauth/revoke` with `token={t}` + client 
    ```
    → `{ intent_id, status, amount, ref, description, user_id, paid }`. Grant only when `paid === true`.
 
+### Reverse pay - pay/reward a user from app balance
+First fund the app's balance in the dashboard (**Manage -> Funding**) or route
+new payment income into app balance. Then call this server-side:
+```
+POST http://localhost:3000/api/pay/reverse
+client_id=...&client_secret=...&user_id={sub}&amount={positive int}
+&ref={your payout idempotency key}&description={optional}
+```
+-> `{ payout_id, status:"completed", amount, user_id, ref, duplicate, app_balance, paid:true }`.
+Retrying the same ref is safe and will not pay twice. Low app balance returns
+`402 insufficient_funds`. Reverse-paid credits are spendable user credits, not
+withdrawable developer income.
+
 ### Webhooks (optional, recommended)
 Configure a webhook URL on the app in the dashboard (**Manage → Webhook**); saving
 reveals a signing secret once. On settle we POST JSON with headers
@@ -105,9 +127,41 @@ reveals a signing secret once. On settle we POST JSON with headers
 Verify the signature, de-dupe on the id, and still treat verify as authoritative.
 Delivery is best-effort.
 
+## Data store — store/fetch JSON (only if the app needs to persist data)
+**When to use this — read first.** This store is a *fallback for apps that have no
+database of their own*. If the project already has a database (Postgres, SQLite,
+Mongo, Supabase, an ORM, etc.), use that — do **not** reach for this. Only consider
+it when there is genuinely no datastore and the user would otherwise have to set
+one up. Before using it, **ask the user** ("Your app has no database — want me to
+use Friend Group Auth's hosted JSON store instead of setting one up?") and wait for
+a yes. Don't wire it in unprompted.
+
+A hosted JSON key–value store scoped to the app, for persisting data from a
+serverless/edge backend without its own database. Plain client-authenticated
+HTTPS + JSON (no driver/pool). **Server-to-server only — never call it from the
+browser.** Authenticate like the pay endpoints (client_id + client_secret in the
+JSON body, or HTTP Basic). Two scopes:
+- `scope: "user"` — keyed to one user; pass their `sub` (from userinfo) as
+  `user_id`. Per-user state/preferences/saves.
+- `scope: "app"` — one namespace shared across the whole app; omit `user_id`.
+
+Data is isolated per app. All endpoints are `POST` with a JSON body:
+- **Set** `/api/data/set` — `{ client_id, client_secret, scope, user_id?, key, value }`
+  → `{ key, ok:true, updated_at }` (upsert, last-write-wins).
+- **Get** `/api/data/get` — `{ …, scope, user_id?, key }`
+  → `{ key, value, found }` (`value` is null when `found===false`).
+- **Delete** `/api/data/delete` — `{ …, scope, user_id?, key }` → `{ key, deleted }`.
+- **List** `/api/data/list` — `{ …, scope, user_id?, prefix?, limit?, cursor? }`
+  → `{ entries:[{ key, value, updated_at }], next_cursor }` (ordered by key; page
+  by passing `next_cursor` back as `cursor` until it's null).
+
+`value` may be any JSON (including `null`) — use `found` to tell a stored null
+from a missing key. Limits: key ≤ 256 chars, value ≤ 256 KB JSON-encoded; bad
+input → `400 invalid_request`, bad creds → `401 invalid_client`.
+
 ## Gotchas
 - `redirect_uri` mismatch (scheme/host/path) is the most common failure.
 - A user can be `allowed: false` even while logged in (left the server / lost the
   role) — re-check on each login.
-- Credits are whole numbers; there's no currency conversion.
+- Credits are whole numbers, fixed at 1 credit = 1 TWD — price in credits at that rate.
 
